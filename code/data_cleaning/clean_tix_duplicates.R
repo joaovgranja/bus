@@ -153,10 +153,10 @@ data_tickets[
   servico_idx := case_when(
     str_detect( tipo_servico, "Convencional sem" ) ~ 0L,
     str_detect( tipo_servico, "Convencional com" ) ~ 1L,
-    str_detect( tipo_servico, "Semileito" ) ~ 2L,
-    str_detect( tipo_servico, "Leito sem" ) ~ 3L,
-    str_detect( tipo_servico, "Leito com" ) ~ 4L,
-    str_detect( tipo_servico, "Executivo" ) ~ 5L,
+    str_detect( tipo_servico, "Executivo" ) ~ 2L,
+    str_detect( tipo_servico, "Semileito" ) ~ 3L,
+    str_detect( tipo_servico, "Leito sem" ) ~ 4L,
+    str_detect( tipo_servico, "Leito com" ) ~ 5L,
     TRUE ~ NA_integer_
   )
 ]
