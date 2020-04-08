@@ -262,6 +262,11 @@ for ( ix in seq_along( dates ) ){
   
   # >>>>> Save <<<<<<
   cat( dates[[ ix ]], ". Save.\n", sep = "" )
-  fwrite( x = data_tickets, file = paste0( "output/dt_tix_wout_duplicates_", dates[[ ix ]], ".csv" ) )
+  # Remove the file in the `output` folder if it exists.
+  if ( file.exists( paste0( "output/dt_tix_wout_duplicates_", dates[[ ix ]], ".csv" ) ) ){
+    file.remove( paste0( "output/dt_tix_wout_duplicates_", dates[[ ix ]], ".csv" ) )
+  }
+  # Save
+  fwrite( x = data_tickets, file = paste0( "clean_data/dt_tix_wout_duplicates_", dates[[ ix ]], ".csv" ) )
   
 }
