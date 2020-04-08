@@ -19,7 +19,7 @@ library( data.table )
 
 # Load data and take unique ---------------------------------------------------------------
 
-dt_trips <- fread( "output/dt_trips_with_origin_dest.csv", integer64 = "character" )
+dt_trips <- fread( "clean_data/dt_trips_with_origin_dest.csv", integer64 = "character" )
 dt_trips
 
 dt_trips <- unique( dt_trips,
@@ -54,7 +54,7 @@ dt_trips[
           data_inicio_viagem, data_fim_viagem, sentido_linha, latitude, longitude,
           pdop, numero_imei, in_transbordo, codigo_viagem_transbordo, ponto_origem_linha, ponto_destino_linha )
   ]
-#
+# empty!
 
 # nu_linha, data, hora, sentido_linha, placa
 dt_trips[
@@ -74,7 +74,7 @@ dt_trips[
 
 # I will force uniqueness at the nu_linha, placa, data_viagem_programada, hora_viagem_programada, sentido_linha level.
 # Note that some of the remaining duplicates at the nu_linha, data_viagem_programada, hora_viagem_programada, sentido_linha 
-# may also be incorrect.
+# may also be incorrect. They may be correct, though (different lines for different types of service)
 
 # Define an observation ID ------------------------------------------------
 
@@ -261,6 +261,7 @@ dt_trips_mult_types <- dt_trips_mult_types[
 # Append it back to dt_trips
 dt_trips <- rbindlist( list( dt_trips, dt_trips_mult_types ), use.names = TRUE )
 rm( dt_trips_mult_types )
+#
 
 # Any problems remaining? -------------------------------------------------
 
@@ -296,6 +297,7 @@ dt_trips_duplicates <- dt_trips_duplicates[
 # Append them back
 dt_trips <- rbindlist( list( dt_trips, dt_trips_duplicates ), use.names = TRUE )
 rm( dt_trips_duplicates )
+#
 
 # Inspect the linha/data/hora/sentido duplicates one last time ------------
 
@@ -320,7 +322,7 @@ dt_trips[ sample( x = seq_len( nrow( dt_trips ) ), size = 10 ) ]
 
 # Save the result ---------------------------------------------------------
 
-fwrite( x = dt_trips, file = "output/dt_trips_od_no_duplicates.csv" )
+fwrite( x = dt_trips, file = "clean_data/dt_trips_od_no_duplicates.csv" )
 
 # Check that all dates are covered
 # dates <- lubridate::dmy( dt_trips$data_viagem_programada )
