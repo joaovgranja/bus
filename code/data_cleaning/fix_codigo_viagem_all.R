@@ -23,15 +23,17 @@ for ( ix in seq_along( dates ) ){
   
 # >>>>> Price data for September/2019 <<<<<
 #data_tickets <- fread( paste0( "raw_data/monitriip/bilhetes_de_passagem/venda_passagem_", dates[[ ix ]], ".csv" ), integer64 = "character" )
-data_tickets <- fread( paste0( "output/dt_tix_wout_duplicates_", dates[[ ix ]], ".csv" ), integer64 = "character" )  
+data_tickets <- fread( paste0( "clean_data/dt_tix_wout_duplicates_", dates[[ ix ]], ".csv" ), integer64 = "character" )  
 # Get rid of duplicates
 #data_tickets <- unique( data_tickets, by = 2:length( data_tickets ) ) # unique on everything other than codigo_viagem
 
 # >>>>> Trip data, September 2019 <<<<<
 #data_trips <- fread( paste0( "raw_data/monitriip/viagens/viagem_regular_", dates[[ ix ]], ".csv" ), integer64 = "character" )
 #data_trips <- unique( data_trips, by = 2:length( data_trips ) )
-data_trips <- fread( "output/dt_trips_od_no_duplicates.csv" )
+data_trips <- fread( "clean_data/dt_trips_od_no_duplicates.csv" )
 data_trips <- data_trips[ lubridate::month( lubridate::dmy( data_viagem_programada ) ) == ix ]
+# Why is the distribution of months so weird and does it matter?
+#data_trips[ , summary( as.factor( lubridate::month( data_viagem_programada ) ) ) ]
 
 # >>>>> Drop international routes <<<<<
 
