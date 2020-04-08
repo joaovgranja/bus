@@ -39,10 +39,11 @@ data_tix
 data_tix[ , c( "ponto_origem_linha", "ponto_destino_linha" ) := tstrsplit( origem_destino_linha, split = " - " ) ][]
 data_tix[ , origem_destino_linha := NULL ]
 data_tix <- unique( data_tix )
+data_tix
 
 # Save the data with routes and origin/dest -------------------------------
 
-fwrite( x = data_tix, file = "output/dt_route_origin_dest.csv" )
+fwrite( x = data_tix, file = "clean_data/dt_route_origin_dest.csv" )
 
 # Join this data to data_trips --------------------------------------------
 
@@ -53,4 +54,8 @@ data_trips <- merge.data.table( x = data_trips, y = data_tix, by = "nu_linha", a
 
 # Save data_trips with origin/dest ----------------------------------------
 
-fwrite( x = data_trips, file = "output/dt_trips_with_origin_dest.csv" )
+fwrite( x = data_trips, file = "clean_data/dt_trips_with_origin_dest.csv" )
+
+
+
+
