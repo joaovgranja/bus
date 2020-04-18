@@ -14,17 +14,24 @@ list.files( "raw_data/monitriip/bilhetes_de_passagem", full.names = TRUE )
 list.files( "raw_data/monitriip/viagens", full.names = TRUE )
 
 dates <- c( paste0( 0, 1:9, "_2019" ),
-            paste0( 10:11, "_2019" ) )
+            paste0( 10:12, "_2019" ),
+            paste0( 0, 1, "_2020" ) )
 
 # Main loop ---------------------------------------------------------------
 
-for ( ix in seq_along( dates ) ){
+for ( ix in ( length( dates ) - 1L ):length( dates ) ){
   
   cat( ">>>>> Cleaning ", dates[[ ix ]], ". <<<<< \n", sep = "" )
   
   # Load the data
-  data_tickets <- fread( paste0( "raw_data/monitriip/bilhetes_de_passagem/venda_passagem_", dates[[ ix ]], ".csv" ),
-                         integer64 = "character" )
+  # If the date is at least Dec 2019, load one of the _26_fields files. Otherwise, run the raw file.
+  current_date <- lubridate::dmy( paste0( "01_", dates[[ ix ]] ) )
+  if ( current_date >= "2019-12-01" ){
+    data_tickets <- fread( paste0( "raw_data/monitriip/bilhetes_de_passagem/venda_passagem_", dates[[ ix ]], "_26_fields.csv" ) )
+  } else {
+    data_tickets <- fread( paste0( "raw_data/monitriip/bilhetes_de_passagem/venda_passagem_", dates[[ ix ]], ".csv" ),
+                           integer64 = "character" )  
+  }
   
   # Unique on everything other than codigo_viagem
   data_tickets <- unique( data_tickets, by = 2:length( data_tickets ) )
