@@ -48,7 +48,7 @@ fkrb <- R6Class( "fkrb", list(
     
   },
   
-  compute_ccps_dt = function( delta, dep_times, supp_tau, kappa = 1, debug = FALSE ){
+  compute_ccps_dt = function( delta, dep_times, supp_tau, kappa = 1, return_ccp_out_option = FALSE, debug = FALSE ){
     
     # >>> Comments <<<
       # This function does exactly the same as the function above, but it takes delta and departure times as arguments directly,
@@ -83,16 +83,24 @@ fkrb <- R6Class( "fkrb", list(
     # 9. Choice probabilities for each type [>>> Note again num_prods + 1 <<<]
     mat_ccps <- utilities / matrix( data = colSums( utilities ), nrow = num_prods + 1, ncol = length_supp, byrow = TRUE )
     
-    # Drop the outside option and return
-    mat_ccps[ -1, ]
+    # Return
+    if ( return_ccp_out_option ){
+      mat_ccps
+    } else {
+      mat_ccps[ -1, ]
+    }
     
   },
   
-  compute_mkt_shares = function( dist_tau, prod_chars, supp_tau, kappa ){
+  compute_mkt_shares = function( dist_tau, prod_chars, supp_tau, kappa, debug = FALSE ){
     
     # >>> Arguments <<<
       # prod_chars, supp_tau and kappa are as in `compute_ccps`
       # dist_tau is the (discretized) distribution of tau (consumers' ideal points)
+    
+    if ( debug ){
+      browser()
+    }
     
     # Compute CCPs
     mat_ccps <- self$compute_ccps( prod_chars = prod_chars, supp_tau = supp_tau, kappa = kappa )
@@ -102,11 +110,15 @@ fkrb <- R6Class( "fkrb", list(
     
   },
   
-  compute_mkt_shares_dt = function( dist_tau, delta, dep_times, supp_tau, kappa ){
+  compute_mkt_shares_dt = function( dist_tau, delta, dep_times, supp_tau, kappa, debug = FALSE ){
     
     # >>> Comments <<<
       # This function is just like `compute_mkt_shares` but takes delta and departure times directly as arguments,
       # instead of prod_chars
+    
+    if ( debug ){
+      browser()
+    }
     
     # Compute CCPs
     mat_ccps <- self$compute_ccps_dt( delta = delta, dep_times = dep_times, supp_tau = supp_tau, kappa = kappa )
@@ -136,7 +148,7 @@ fkrb <- R6Class( "fkrb", list(
     
   },
   
-  contraction_mapping = function( dt_tmp, tol, iter_max, debug = FALSE ){
+  contraction_mapping = function( dt_tmp, kappa, supp_tau, dist_tau, tol, iter_max, debug = FALSE ){
     
     if ( debug ){
       browser()
@@ -153,19 +165,19 @@ fkrb <- R6Class( "fkrb", list(
       # Compute shares, observed and predicted quantity and update delta
       dt_delta_new <- dt_tmp_copy[
         ,
-        daily_mkt_shares := fkrb_inst$compute_mkt_shares_dt( dist_tau = dist_tau,
-                                                             delta = delta,
-                                                             dep_times = time_of_day,
-                                                             supp_tau = supp_tau,
-                                                             kappa = 1
-                                                             ),
+        daily_mkt_shares := self$compute_mkt_shares_dt( dist_tau = dist_tau,
+                                                        delta = delta,
+                                                        dep_times = time_of_day,
+                                                        supp_tau = supp_tau,
+                                                        kappa = kappa
+        ),
         by = .( data_viagem )
         ][
           ,
           .(
             delta = delta[[ 1 ]], # unique within the group by construction
-            total_qty = sum( num_tix ),
-            predicted_qty = sum( daily_mkt_shares ) * mkt_size
+            total_qty = sum( scaled_num_tix ),
+            predicted_qty = sum( daily_mkt_shares ) * market_size[[ 1 ]] # Market size is constant within the group by construction
           ),
           by = .( prod_delta_idx )
           ][
@@ -198,6 +210,220 @@ fkrb <- R6Class( "fkrb", list(
     
     # Return dt_tmp_copy with the updated delta
     dt_tmp_copy
+    
+  },
+  
+  estimate_delta_omega = function( kappa, dt_tmp, supp_tau, tol, tol_contraction, return_omega = FALSE, verbose = FALSE, debug = FALSE ){
+    
+    # >>> Comments <<<
+      # This function estimates delta and omega as a function of kappa.
+      # It also computes the resulting sum of squared residuals.
+    
+    if ( debug ){
+      browser()
+    }
+    
+    # Deep copy the argument.
+    dt_tmp_copy <- copy( dt_tmp )
+    
+    # Compute delta
+    dt_tmp_copy[
+      ,
+      delta := log( mkt_share ) - log( 1 - sum( mkt_share ) ),
+      by = .( market, data_viagem )
+      ][
+        ,
+        delta := mean( delta ),
+        by = .( market, cnpj, tipo_servico_novo, ano_viagem, mes_viagem )
+        ]
+    
+    # Support length
+    length_supp <- length( supp_tau )
+    
+    # # Define prod_delta_idx for all months
+    # dt_tmp_copy[
+    #   ,
+    #   prod_delta_idx := frank( paste( cnpj, tipo_servico_novo ), ties.method = "dense" ),
+    #   by = .( market, ano_viagem, mes_viagem )
+    #   ]
+    
+    # Delta convergence bool
+    conv_delta <- FALSE
+    
+    # >>> Some objects that don't change <<<
+    # FKRB inputs
+    B_ls <- dt_tmp_copy[ , mkt_share ]
+    E_ls <- matrix( data = 1, nrow = 1, ncol = length_supp )
+    F_ls <- 1
+    G_ls <- diag( length_supp )
+    H_ls <- rep( 0, length_supp )
+    
+    while( !conv_delta ){
+      
+      # Store current value/guess of delta
+      delta_current <- dt_tmp_copy[
+        ,
+        .( delta = delta[[ 1 ]] ), # delta constant within group.
+        by = .( market, ano_viagem, mes_viagem, prod_delta_idx )
+        ][ , delta ]
+      
+      # Compute FKRB mats for all markets (days)
+      list_fkrb_mats <- dt_tmp_copy[
+        ,
+        .(
+          fkrb_mat = list( self$compute_ccps_dt( delta = delta, dep_times = time_of_day, supp_tau = supp_tau, kappa = kappa ) )
+        ),
+        by = .( market, data_viagem )
+        ][
+          ,
+          fkrb_mat
+          ]
+      
+      # Estimate the tau distribution by FKRB
+      # Constrained least squares using limSolve::lsei
+      A_ls <- do.call( what = rbind, args = list_fkrb_mats )
+      
+      estimate <- limSolve::lsei( A = A_ls, B = B_ls, E = E_ls, F = F_ls, G = G_ls, H = H_ls,
+                                  type = 2 )
+      
+      dist_tau <- estimate$X
+      
+      # Solve for delta's from constraints *separately month by month*
+      # >>> First try <<<
+      # First it failed because .SD can't be modified in place
+      # Now it works because I'm deep-copying the argument `dt_tmp_copy`
+      dt_tmp_copy <- dt_tmp_copy[
+        ,
+        self$contraction_mapping( dt_tmp = .SD, kappa = kappa, supp_tau = supp_tau, dist_tau = dist_tau, tol = tol_contraction, iter_max = 100 ),
+        by = .( market, ano_viagem, mes_viagem )
+        ]
+      # >>> First try <<<
+      
+      # Check for convergence
+      delta_new <- dt_tmp_copy[
+        ,
+        .( delta = delta[[ 1 ]] ), # delta constant within group.
+        by = .( market, ano_viagem, mes_viagem, prod_delta_idx )
+        ][ , delta ]
+      dist_delta <- max( abs( delta_current - delta_new ) )
+      conv_delta <- ( dist_delta < tol )
+      if ( verbose ){
+        cat( "dist_delta = ", dist_delta, ".\n", sep = "" )
+      }
+      
+    }
+    
+    # Compute the resulting market shares *and* the SSRs
+    ssr <- dt_tmp_copy[
+      ,
+      daily_mkt_shares := self$compute_mkt_shares_dt( dist_tau = dist_tau,
+                                                      delta = delta,
+                                                      dep_times = time_of_day,
+                                                      supp_tau = supp_tau,
+                                                      kappa = kappa
+      ),
+      by = .( market, data_viagem )
+    ][
+      ,
+      sum( ( mkt_share - daily_mkt_shares )^2 )
+    ]
+    
+    if ( return_omega ){
+      list( ssr = ssr, omega = dist_tau )
+    } else {
+      ssr
+    }
+    
+  },
+  
+  compute_mkt_posterior_dt = function( omega, mat_ccps, delta, dep_times, market_shares, supp_tau, kappa, debug = FALSE ){
+    
+    # >>> Comments <<<
+      # This is a silly function bc the EM boils down to matrix operations
+    
+    # >>> Arguments <<<
+      # omega is the (current guess of) the distribution of \tau.
+      # mat_ccps is a J x M matrix. Entry (j,m) is the probability that j is chosen by type m.
+    
+    if ( debug ){
+      browser()
+    }
+    
+    # Number of products
+    num_prods <- length( dep_times ) + 1 # + 1 for the outside option
+    # Number of points of support
+    length_support <- length( supp_tau )
+    
+    # Compute matrix of CCPs (products on rows, consumer types on columns)
+    #mat_ccps <- self$compute_ccps_dt( delta = delta, dep_times = dep_times, supp_tau = supp_tau, kappa = kappa, return_ccp_out_option = TRUE )
+    
+    # Weight CCPs by current distribution of tau
+    weighted_ccps <- mat_ccps * matrix( data = omega, nrow = num_prods, ncol = length_support, byrow = TRUE )
+    
+    # Compute denominators of posterior distribution of \tau
+    unconditional_probs <- rowSums( weighted_ccps )
+    
+    # Compute posterior probabilities
+    posterior_dist <- weighted_ccps / matrix( data = unconditional_probs, nrow = num_prods, ncol = length_support )
+    
+    # Compute the market posterior and return
+    c( 1 - sum( market_shares ), market_shares ) %*% posterior_dist
+    
+  },
+  
+  compute_em = function( omega_0, ccp_mat_stacked, vec_num_tix,
+                         tol = 1e-03, iter_max = 1e+06, verbose = FALSE, debug = FALSE ){
+    
+    # >>> Arguments <<<
+      # omega_0 is the initial guess for the \omega distribution
+    
+    if ( debug ){
+      browser()
+    }
+    
+    omega <- omega_0
+    conv <- FALSE
+    
+    num_prods_total <- nrow( ccp_mat_stacked )
+    length_support <- length( omega )
+    total_tix <- sum( vec_num_tix )
+    iter <- 1
+    
+    while( !conv && iter <= iter_max ){
+      
+      # Weight ccps
+      weighted_ccps <- ccp_mat_stacked * matrix( data = omega, nrow = num_prods_total, ncol = length_support, byrow = TRUE )
+      
+      # Compute denominators of posterior distribution of \tau
+      unconditional_probs <- rowSums( weighted_ccps )
+      
+      # Compute posterior probabilities
+      posterior_dist <- weighted_ccps / matrix( data = unconditional_probs, nrow = num_prods_total, ncol = length_support )
+      
+      # Update the distribution
+      omega_new <- num_tix %*% posterior_dist / total_tix
+      
+      # Check convergence
+      dist <- max( abs( omega_new - omega ) )
+      conv <- ( dist < tol )
+      
+      # Print message
+      if ( verbose && ( ( iter %% 25 ) == 0 ) ){
+        cat( "dist = ", dist, ".\n", sep = "" )
+      }
+      
+      # Update omega
+      omega <- omega_new
+      iter <- iter + 1
+      
+    }
+    
+    # Return the result
+    if ( conv ){
+      omega
+    } else {
+      stop( "EM algorithm failed to converge.\n" )
+    }
     
   }
   
