@@ -45,3 +45,14 @@ arma::mat cpp_compute_ccps_dt( arma::vec delta, arma::vec dep_times, arma::rowve
   return mat_ccps;
   
 }
+
+// [[Rcpp::export]]
+arma::vec cpp_compute_mkt_shares_dt( arma::vec dist_tau, arma::vec delta, arma::vec dep_times, arma::rowvec supp_tau, double kappa ){
+  
+  // Compute CCPs
+  arma::mat mat_ccps = cpp_compute_ccps_dt( delta, dep_times, supp_tau, kappa );
+  
+  // Return
+  return mat_ccps * dist_tau;
+  
+}
