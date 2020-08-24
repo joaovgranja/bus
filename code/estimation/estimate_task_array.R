@@ -21,10 +21,15 @@ rm( fkrb )
 
 # Load data --------------------------------------------
 
-dt_products <- fread( input = "clean_data/dt_fkrb_full_route_only.csv",
+dt_products <- fread( input = "clean_data/dt_fkrb_gontijo.csv",
                       keepLeadingZeros = TRUE,
                       integer64 = "character"
 )
+
+# if `scaled_num_tix` is not available, create it (in that case this is the gontijo dataset)
+if ( !( "scaled_num_tix" %in% names( dt_products ) ) ){
+  dt_products[ , scaled_num_tix := num_tix ]
+}
 
 # Create dia_viagem (move this to the file preparing data) -----------------------
 
@@ -63,4 +68,4 @@ output <- fkrb_inst$estimate_delta_omega_vcpp( kappa = task_id, dt_tmp = dt_prod
 
 # Save --------------------------------------------------------------------
 
-saveRDS( object = output, file = paste( "output/estimate_delta_omega/edo_kappa_", task_id, ".Rds", sep = "" ) )
+saveRDS( object = output, file = paste( "output/estimate_delta_omega/edo_kappa_gontijo", task_id, ".Rds", sep = "" ) )
