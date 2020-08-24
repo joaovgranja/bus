@@ -26,9 +26,16 @@ dt_products <- fread( input = "clean_data/dt_fkrb_gontijo.csv",
                       integer64 = "character"
 )
 
-# if `scaled_num_tix` is not available, create it (in that case this is the gontijo dataset)
+# if `scaled_num_tix` is not available (this is gontijo data), create it
+# Also create data_ym01
 if ( !( "scaled_num_tix" %in% names( dt_products ) ) ){
-  dt_products[ , scaled_num_tix := num_tix ]
+  dt_products[
+    ,
+    `:=`(
+      scaled_num_tix = num_tix,
+      data_ym01 = paste( ano_viagem, str_pad( string = mes_viagem, width = 2L, side = "left", pad = "0" ), "01", sep = "-" )
+    )
+    ][]
 }
 
 # Create dia_viagem (move this to the file preparing data) -----------------------
