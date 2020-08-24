@@ -1,8 +1,11 @@
 # This script defines a class used in the implementation of FKRB
 
 library( R6 )
+library( Rcpp )
+library( RcppArmadillo )
 
-# Source the C++ version of `compute_market_shares_municipality`
+# Source the C++ script with equivalent implementations
+sourceCpp( file = "code/estimation/cpp_fkrb.cpp" )
 
 fkrb <- R6Class( "fkrb", list(
   
@@ -124,7 +127,7 @@ fkrb <- R6Class( "fkrb", list(
     mat_ccps <- self$compute_ccps_dt( delta = delta, dep_times = dep_times, supp_tau = supp_tau, kappa = kappa )
     
     # Integrate and return
-    mat_ccps %*% dist_tau
+    as.numeric( mat_ccps %*% dist_tau )
     
   },
   
@@ -148,7 +151,166 @@ fkrb <- R6Class( "fkrb", list(
     
   },
   
+  compute_pred_qty_mkt_month = function( dt_mkt_month, dist_tau, supp_tau, kappa, debug = FALSE ){
+    
+    # This function is here just for development purposes.
+    # It is written in the ***exact*** way that it will be implemented in C++/Armadillo.
+    
+    if ( debug ){
+      browser()
+    }
+    
+    # 0. Get some objects needed below
+    delta <- dt_mkt_month[ , delta ]
+    dep_times <- dt_mkt_month[ , time_of_day ]
+    market_size <- dt_mkt_month[ , unique( market_size ) ]
+    # 1. What days appear in the data?
+    days <- dt_mkt_month[ , dia_viagem ]
+    unique_days <- sort( unique( days ) )
+    # 2. What prod_delta_idx appear in the data?
+    prod_delta_idx <- dt_mkt_month[ , prod_delta_idx ]
+    unique_prod_delta_idx <- sort( unique( prod_delta_idx  ) )
+    # 3. Initialize predicted shares
+    predicted_shares <- numeric( length = length( unique_prod_delta_idx ) )
+    # 4. Loop over days updating predicted shares
+    for ( ix in seq_along( unique_days ) ){
+      
+      # Get indices of this day in dt_mkt_month
+      relevant_day <- unique_days[[ ix ]]
+      idx_in_dt <- which( days == relevant_day )
+      
+      # What prod_delta_idx appear in this day?
+      prod_delta_idx_day <- prod_delta_idx[ idx_in_dt ]
+      unique_prod_delta_idx_day <- sort( unique( prod_delta_idx_day ) )
+      
+      # Compute daily market shares
+      mkt_shares_day <- self$compute_mkt_shares_dt( dist_tau = dist_tau,
+                                                    delta = delta[ idx_in_dt ],
+                                                    dep_times = dep_times[ idx_in_dt ],
+                                                    supp_tau = supp_tau,
+                                                    kappa = kappa )
+      
+      # Loop over the prod_delta_idx that appear in the day aggregating predicted_shares
+      for ( jx in seq_along( unique_prod_delta_idx_day ) ){
+        # What are the indices (of mkt_shares_day) that correspond to the ix-th prod_delta_idx
+        idx_tmp <- unique_prod_delta_idx_day[[ jx ]]
+        prod_idx <- which( prod_delta_idx_day == idx_tmp )
+        # Sum the corresponding market shares and add to predicted shares
+        predicted_shares[[ idx_tmp ]] <- predicted_shares[[ idx_tmp ]] + sum( mkt_shares_day[ prod_idx ] )
+      }
+      
+      # Add these market shares to the corresponding entries in `predicted_shares`
+      #predicted_shares[ prod_delta_idx_day ] <- predicted_shares[ prod_delta_idx_day ] + mkt_shares_day
+      
+    }
+    
+    # Return predicted quantities
+    market_size * predicted_shares
+    
+  },
+  
+  update_delta_mkt_month = function( dt_mkt_month, dist_tau, supp_tau, kappa, debug = FALSE ){
+    
+    # Again, this function exists *only* for development.
+    # It is coded in C++ style to facilitate conversion.
+    
+    if ( debug ){
+      browser()
+    }
+    
+    # What prod_delta_idx appear in the data?
+    prod_delta_idx <- dt_mkt_month[ , prod_delta_idx ]
+    unique_prod_delta_idx <- sort( unique( prod_delta_idx  ) )
+    
+    # Get the vector of delta's [Note this has to be done differently in C++ because arma::unique automatically sorts]
+    unique_deltas <- dt_mkt_month[
+      ,
+      .( delta = delta[[ 1 ]] ),
+      by = .( prod_delta_idx )
+      ][
+        order( prod_delta_idx )
+        ][ , delta ]
+    
+    # Get the vector of observed daily quantities
+    observed_daily_qtys <- dt_mkt_month[ , scaled_num_tix ]
+    
+    # Computed observed quantities
+    # Initialize a vector to store those
+    observed_qtys <- numeric( length( unique_prod_delta_idx ) )
+    
+    for ( ix in seq_along( unique_prod_delta_idx ) ){
+      
+      # Find the indices of the ix-th prod_delta_idx
+      idx_in_dt <- which( prod_delta_idx == unique_prod_delta_idx[[ ix ]] )
+      
+      # Aggregate quantities
+      observed_qtys[[ ix ]] <- sum( observed_daily_qtys[ idx_in_dt ] )
+      
+    }
+    
+    # Compute predicted_qtys
+    predicted_qtys <- self$compute_pred_qty_mkt_month( dt_mkt_month = dt_mkt_month, dist_tau = dist_tau, supp_tau = supp_tau, kappa = kappa )
+    
+    # Update delta and return
+    delta_new <- unique_deltas + log( observed_qtys ) - log( predicted_qtys )
+    #list( prod_delta_idx = unique_prod_delta_idx, delta = unique_deltas, observed_qtys = observed_qtys, predicted_qtys = predicted_qtys, delta_new = delta_new )
+    delta_new
+    
+  },
+  
+  contraction_mapping_vcpp = function( dt_mkt_month, dist_tau, supp_tau, kappa, tol, iter_max, debug = FALSE ){
+    
+    if ( debug ){
+      browser()
+    }
+    
+    # Deep copy dt_mkt_month
+    dt_copy <- copy( dt_mkt_month )
+    
+    # Initial guess: vector of unique delta's in the data
+    delta_current <- dt_copy[
+      ,
+      .( delta = delta[[ 1 ]] ),
+      by = .( prod_delta_idx )
+      ][
+        order( prod_delta_idx )
+        ][ , delta ]
+    
+    # Loop iteratively updating delta
+    dist_delta <- 1
+    iter <- 1
+    while ( dist_delta >= tol && iter <= iter_max ){
+      
+      # Update delta's
+      delta_new <- self$update_delta_mkt_month( dt_mkt_month = dt_copy, dist_tau = dist_tau, supp_tau = supp_tau, kappa = kappa )
+      # Compute the distance between delta's
+      dist_delta <- max( abs( delta_current - delta_new ) )
+      # Update delta_current
+      delta_current <- delta_new
+      # Change delta in dt_copy
+      dt_copy[ , delta := delta_current[ prod_delta_idx ] ]
+      # Update iteration counter
+      iter <- iter + 1
+      
+    }
+    
+    if ( dist_delta >= tol ){
+      stop( "Contraction mapping vcpp failed to converge." )
+    }
+    
+    # Return dt_copy, now with the new delta.
+    #dt_copy
+    
+    # Return a list with two vectors: prod_delta_idx and delta
+    list( prod_delta_idx = dt_copy[ , sort( unique( prod_delta_idx ) ) ],
+          delta = delta_current
+          )
+    
+  },
+  
   contraction_mapping = function( dt_tmp, kappa, supp_tau, dist_tau, tol, iter_max, debug = FALSE ){
+    
+    # dt_tmp here is a market-month level dataset.
     
     if ( debug ){
       browser()
@@ -327,6 +489,110 @@ fkrb <- R6Class( "fkrb", list(
       ,
       sum( ( mkt_share - daily_mkt_shares )^2 )
     ]
+    
+    if ( return_omega ){
+      list( ssr = ssr, omega = dist_tau )
+    } else {
+      ssr
+    }
+    
+  },
+  
+  estimate_delta_omega_vcpp = function( kappa, dt_tmp, supp_tau, tol, tol_contraction, return_omega = FALSE, verbose = FALSE, debug = FALSE ){
+    
+    # Version of estimate_delta_omega using C++ functions.
+    
+    if ( debug ){
+      browser()
+    }
+    
+    # Deep copy the argument.
+    dt_tmp_copy <- copy( dt_tmp )
+    
+    # Support length
+    length_supp <- length( supp_tau )
+    
+    # Delta convergence bool
+    conv_delta <- FALSE
+    
+    # >>> Some objects that don't change <<<
+    # FKRB inputs
+    B_ls <- dt_tmp_copy[ , mkt_share ]
+    E_ls <- matrix( data = 1, nrow = 1, ncol = length_supp )
+    F_ls <- 1
+    G_ls <- diag( length_supp )
+    H_ls <- rep( 0, length_supp )
+    
+    while( !conv_delta ){
+      
+      # Store current value/guess of delta
+      delta_current <- dt_tmp_copy[
+        ,
+        .( delta = delta[[ 1 ]] ), # delta constant within group.
+        keyby = .( market, ano_viagem, mes_viagem, prod_delta_idx )
+        ][ , delta ]
+      
+      # Compute FKRB mats for all markets (days)
+      list_fkrb_mats <- dt_tmp_copy[
+        ,
+        .(
+          fkrb_mat = list( cpp_compute_ccps_dt( delta = delta, dep_times = time_of_day, supp_tau = supp_tau, kappa = kappa ) )
+        ),
+        by = .( market, data_viagem )
+        ][
+          ,
+          fkrb_mat
+          ]
+      
+      # Estimate the tau distribution by FKRB
+      # Constrained least squares using limSolve::lsei
+      A_ls <- do.call( what = rbind, args = list_fkrb_mats )
+      
+      estimate <- limSolve::lsei( A = A_ls, B = B_ls, E = E_ls, F = F_ls, G = G_ls, H = H_ls,
+                                  type = 2 )
+      
+      dist_tau <- estimate$X
+      
+      # Solve for delta's from constraints *separately month by month*
+      # >>> First try <<<
+      # First it failed because .SD can't be modified in place
+      # Now it works because I'm deep-copying the argument `dt_tmp_copy`
+      dt_delta_new <- dt_tmp_copy[
+        ,
+        cpp_contraction_mapping( dt_mkt_month = as.matrix( .SD[ , .( dia_viagem, prod_delta_idx, delta, time_of_day, market_size, scaled_num_tix ) ] ),
+                                 dist_tau = dist_tau, supp_tau = supp_tau, kappa = kappa, tol = tol_contraction, iter_max = 100 ),
+        keyby = .( market, ano_viagem, mes_viagem )
+        ]
+      # >>> First try <<<
+      
+      # Check for convergence
+      delta_new <- dt_delta_new[ , delta ]
+      dist_delta <- max( abs( delta_current - delta_new ) )
+      conv_delta <- ( dist_delta < tol )
+      if ( verbose ){
+        cat( "dist_delta = ", dist_delta, ".\n", sep = "" )
+      }
+      
+      # Update delta in dt_tmp_copy
+      dt_tmp_copy[ , delta := NULL ]
+      dt_tmp_copy <- dt_delta_new[ dt_tmp_copy, on = c( "market", "ano_viagem", "mes_viagem", "prod_delta_idx" ) ]
+      
+    }
+    
+    # Compute the resulting market shares *and* the SSRs
+    ssr <- dt_tmp_copy[
+      ,
+      daily_mkt_shares := cpp_compute_mkt_shares_dt( dist_tau = dist_tau,
+                                                     delta = delta,
+                                                     dep_times = time_of_day,
+                                                     supp_tau = supp_tau,
+                                                     kappa = kappa
+                                                     ),
+      by = .( market, data_viagem )
+      ][
+        ,
+        sum( ( mkt_share - daily_mkt_shares )^2 )
+        ]
     
     if ( return_omega ){
       list( ssr = ssr, omega = dist_tau )
