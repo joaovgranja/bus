@@ -33,6 +33,23 @@ dt_products[
   dia_viagem := as.integer( str_extract( string = data_viagem, pattern = "\\d{2}$" ) )
   ][]
 
+# Compute an initial delta, used throughout -------------------------------
+
+dt_products[
+  ,
+  delta := log( mkt_share ) - log( share_out_option ),
+  by = .( market, data_viagem )
+  ][
+    ,
+    delta := mean( delta ),
+    by = .( market, data_ym01, prod_delta_idx )
+    ][]
+#
+
+# Define supp_tau, used throughout ----------------------------------------
+
+supp_tau <- seq( 0, 1, length.out = 40L )
+
 # Call --------------------------------------------------------------------
 
 # Get task_id
